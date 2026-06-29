@@ -1,0 +1,20 @@
+{
+  "name": "shipwright-backend",
+  "version": "0.1.0",
+  "description": "Backend service for Shipwright Engineering — production-quality SaaS builds",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "check": "bun x tsc --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  }
+}

@@ -1,0 +1,31 @@
+# Example CI Test Configuration (GitHub Actions)
+
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: |
+          cd backend && bun install
+          cd ../site && bun install
+
+      - name: Run Backend Tests
+        run: cd backend && bun test
+
+      - name: Run Frontend Tests
+        run: cd site && bun test
