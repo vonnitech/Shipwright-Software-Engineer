@@ -1,25 +1,74 @@
 /**
  * Route dispatcher.
- * Maps request paths and methods to handler functions.
+ * Maps request methods + paths to handler functions.
+ * Supports parameterized routes (/resource/:id).
  */
 
-import type { ServerRequest } from "bun";
-import { handleHealth } from "./health";
+export type RouteHandler = (
+  req: Request,
+  ...params: string[]
+) => Response | Promise<Response>;
 
-export type RouteHandler = (req: ServerRequest) => Response | Promise<Response>;
+interface RouteEntry {
+  method: string;
+  handler: RouteHandler;
+  pattern: RegExp;
+  paramCount: number;
+}
 
-/** Simple route table: Map<"METHOD /path", handler> */
-const routes = new Map<string, RouteHandler>();
-
-routes.set("GET /health", handleHealth);
+const routes: RouteEntry[] = [];
 
 /**
- * Match an incoming request to a registered route.
- * Returns the handler or null if no route matches.
+ * Register a route with optional path parameters.
+ */
+export function registerRoute(
+  method: string,
+  path: string,
+  handler: RouteHandler
+): void {
+  const paramCount = (path.match(/:\w+/g) || []).length;
+  const regexStr =
+    "^" +
+    path
+      .split("/")
+      .map((segment) => {
+        if (segment.startsWith(":")) {
+          return "([^/]+)";
+        }
+        return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      })
+      .join("/") +
+    "$";
+
+  routes.push({
+    method,
+    handler,
+    pattern: new RegExp(regexStr),
+    paramCount,
+  });
+}
+
+/**
+ * Match an incoming request and return [handler, extracted params].
  */
 export function matchRoute(
   method: string,
   pathname: string
-): RouteHandler | null {
-  return routes.get(`${method} ${pathname}`) ?? null;
+): { handler: RouteHandler; params: string[] } | null {
+  for (const entry of routes) {
+    if (entry.method !== method) continue;
+    const match = pathname.match(entry.pattern);
+    if (match) {
+      return {
+        handler: entry.handler,
+        params: match.slice(1),
+      };
+    }
+  }
+  return null;
 }
+
+// ---- Require all route modules to register themselves ----
+import "./health";
+import "./auth";
+import "./feature-requests";

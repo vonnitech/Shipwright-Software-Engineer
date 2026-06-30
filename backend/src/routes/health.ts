@@ -1,4 +1,4 @@
-import type { ServerRequest } from "bun";
+import { registerRoute } from "./index";
 
 export interface HealthResponse {
   status: string;
@@ -6,10 +6,9 @@ export interface HealthResponse {
 }
 
 /**
- * GET /health
- * Returns the current health status of the service.
+ * GET /health — Returns service health status.
  */
-export function handleHealth(_req: ServerRequest): Response {
+export function handleHealth(_req: Request): Response {
   const body: HealthResponse = {
     status: "ok",
     service: "shipwright-engineering",
@@ -19,3 +18,5 @@ export function handleHealth(_req: ServerRequest): Response {
     headers: { "Content-Type": "application/json" },
   });
 }
+
+registerRoute("GET", "/health", handleHealth);
