@@ -11,18 +11,21 @@ const PORT = parseInt(process.env.PORT ?? "3001", 10);
 
 Bun.serve({
   port: PORT,
-  fetch(req) {
+  async fetch(req) {
     const url = new URL(req.url);
-    const handler = matchRoute(req.method, url.pathname);
+    const match = matchRoute(req.method, url.pathname);
 
-    if (!handler) {
+    if (!match) {
       return new Response(JSON.stringify({ error: "Not Found" }), {
         status: 404,
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    return handler(req);
+    // Create a ServerRequest-like wrapper that includes url
+    const wrappedReq = req as any;
+    wrappedReq.url = req.url;
+    return match.handler(wrappedReq, ...match.params);
   },
 });
 
