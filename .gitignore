@@ -28,3 +28,8 @@ npm-debug.log*
 # Runtime
 *.pid
 *.seed
+
+# Local SQLite test databases
+*.db
+*.db-journal
+*.sqlite

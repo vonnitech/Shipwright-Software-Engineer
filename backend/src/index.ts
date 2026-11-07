@@ -5,6 +5,13 @@
  * Port is configured via the PORT env var (default 3001).
  */
 
+// Side-effect imports: each route module calls registerRoute() on load.
+// These must come before the dispatcher import so the route table is populated
+// (and they must live here, not in routes/index.ts, to avoid an import cycle).
+import "./routes/health";
+import "./routes/auth";
+import "./routes/feature-requests";
+
 import { matchRoute } from "./routes/index";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
@@ -13,16 +20,16 @@ Bun.serve({
   port: PORT,
   fetch(req) {
     const url = new URL(req.url);
-    const handler = matchRoute(req.method, url.pathname);
+    const match = matchRoute(req.method, url.pathname);
 
-    if (!handler) {
+    if (!match) {
       return new Response(JSON.stringify({ error: "Not Found" }), {
         status: 404,
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    return handler(req);
+    return match.handler(req, ...match.params);
   },
 });
 

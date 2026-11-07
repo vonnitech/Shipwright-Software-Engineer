@@ -8,7 +8,8 @@
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "check": "bun x tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "smoke": "bash scripts/smoke.sh"
   },
   "devDependencies": {
     "@types/bun": "latest",

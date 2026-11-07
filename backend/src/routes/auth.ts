@@ -13,7 +13,7 @@ interface AuthBody {
 
 async function parseBody(req: Request): Promise<AuthBody> {
   try {
-    return await req.json();
+    return (await req.json()) as AuthBody;
   } catch {
     return {};
   }

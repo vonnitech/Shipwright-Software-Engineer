@@ -1,11 +1,25 @@
 /**
  * Feature Request routes — CRUD, voting, admin status updates.
  * Each handler receives (req, ...params) where params come from the URL.
+ *
+ * Response shapes are the contract the frontend (site/src/lib/api.ts, PR #1)
+ * is already built against:
+ *   GET    /api/feature-requests        -> { items, total, page, per_page, total_pages }
+ *   GET    /api/feature-requests/:id    -> FeatureRequest
+ *   POST   /api/feature-requests        -> FeatureRequest (201)
+ *   PATCH  /api/feature-requests/:id    -> FeatureRequest (admin only)
+ *   POST   /api/feature-requests/:id/vote -> { vote_count, has_voted }
+ * Errors are always { error: string }.
  */
 
 import { registerRoute } from "./index";
 import { db, uuid, now } from "../db/index";
-import { getUserFromRequest, requireAdmin } from "../middleware/auth";
+import {
+  AuthError,
+  getUserFromRequest,
+  requireAdmin,
+  type AuthenticatedUser,
+} from "../middleware/auth";
 
 // ---- Helpers ----
 
@@ -18,7 +32,7 @@ function json(data: unknown, status = 200): Response {
 
 async function parseBody(req: Request): Promise<Record<string, unknown>> {
   try {
-    return await req.json();
+    return (await req.json()) as Record<string, unknown>;
   } catch {
     return {};
   }
@@ -28,53 +42,77 @@ function sanitize(val: string): string {
   return val.replace(/'/g, "''");
 }
 
+/** Columns returned for every feature request, plus author details. */
+const FEATURE_REQUEST_SELECT = `SELECT fr.id, fr.title, fr.description, fr.status, fr.vote_count,
+        fr.user_id, fr.created_at, fr.updated_at,
+        u.name as author_name, u.email as author_email
+ FROM feature_requests fr
+ JOIN users u ON fr.user_id = u.id`;
+
+/** Ids of the feature requests this user has voted on. */
+function votedIdsFor(userId: string): Set<string> {
+  const rows = db(
+    `SELECT feature_request_id FROM votes WHERE user_id = '${sanitize(userId)}'`
+  );
+  return new Set(rows.map((row) => String(row.feature_request_id)));
+}
+
+/**
+ * Shape a database row into the API's FeatureRequest payload.
+ * Anonymous callers always get has_voted: false.
+ */
+function toFeatureRequest(
+  row: Record<string, unknown>,
+  voted: Set<string>
+): Record<string, unknown> {
+  return {
+    ...row,
+    vote_count: Number(row.vote_count ?? 0),
+    has_voted: voted.has(String(row.id)),
+  };
+}
+
+function currentUser(req: Request): AuthenticatedUser | null {
+  return getUserFromRequest(req);
+}
+
 // ---- GET /api/feature-requests ----
 
 function handleListFeatureRequests(req: Request): Response {
   const url = new URL(req.url);
-  const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10));
+  const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
   const perPage = Math.min(
     50,
-    Math.max(1, parseInt(url.searchParams.get("per_page") ?? "10", 10))
+    Math.max(1, parseInt(url.searchParams.get("per_page") ?? "10", 10) || 10)
   );
   const offset = (page - 1) * perPage;
 
   const total = db("SELECT COUNT(*) as count FROM feature_requests");
-  const totalCount = (total[0]?.count ?? 0) as number;
+  const totalCount = Number(total[0]?.count ?? 0);
 
   const rows = db(
-    `SELECT fr.id, fr.title, fr.description, fr.status, fr.vote_count,
-            fr.created_at, fr.updated_at,
-            u.name as author_name, u.email as author_email
-     FROM feature_requests fr
-     JOIN users u ON fr.user_id = u.id
+    `${FEATURE_REQUEST_SELECT}
      ORDER BY fr.vote_count DESC, fr.created_at DESC
      LIMIT ${perPage} OFFSET ${offset}`
   );
 
+  const user = currentUser(req);
+  const voted = user ? votedIdsFor(user.userId) : new Set<string>();
+
   return json({
-    data: rows,
-    pagination: {
-      page,
-      per_page: perPage,
-      total: totalCount,
-      total_pages: Math.ceil(totalCount / perPage),
-    },
+    items: rows.map((row) => toFeatureRequest(row, voted)),
+    total: totalCount,
+    page,
+    per_page: perPage,
+    total_pages: Math.ceil(totalCount / perPage),
   });
 }
 
 // ---- GET /api/feature-requests/:id ----
 
-function handleGetFeatureRequest(
-  _req: Request,
-  id: string
-): Response {
+function handleGetFeatureRequest(req: Request, id: string): Response {
   const rows = db(
-    `SELECT fr.id, fr.title, fr.description, fr.status, fr.vote_count,
-            fr.created_at, fr.updated_at,
-            u.name as author_name, u.email as author_email
-     FROM feature_requests fr
-     JOIN users u ON fr.user_id = u.id
+    `${FEATURE_REQUEST_SELECT}
      WHERE fr.id = '${sanitize(id)}'`
   );
 
@@ -82,22 +120,22 @@ function handleGetFeatureRequest(
     return json({ error: "Feature request not found" }, 404);
   }
 
-  return json({ data: rows[0] });
+  const user = currentUser(req);
+  const voted = user ? votedIdsFor(user.userId) : new Set<string>();
+
+  return json(toFeatureRequest(rows[0], voted));
 }
 
 // ---- POST /api/feature-requests ----
 
-async function handleCreateFeatureRequest(
-  req: Request
-): Promise<Response> {
-  const user = getUserFromRequest(req);
+async function handleCreateFeatureRequest(req: Request): Promise<Response> {
+  const user = currentUser(req);
   if (!user) {
     return json({ error: "Authentication required" }, 401);
   }
 
   const body = await parseBody(req);
-  const title =
-    typeof body.title === "string" ? body.title.trim() : "";
+  const title = typeof body.title === "string" ? body.title.trim() : "";
   const description =
     typeof body.description === "string" ? body.description.trim() : "";
 
@@ -119,19 +157,15 @@ async function handleCreateFeatureRequest(
 
   db(
     `INSERT INTO feature_requests (id, title, description, user_id, created_at, updated_at)
-     VALUES ('${id}', '${sanitize(title)}', '${sanitize(description)}', '${sanitize(user.id)}', '${ts}', '${ts}')`
+     VALUES ('${id}', '${sanitize(title)}', '${sanitize(description)}', '${sanitize(user.userId)}', '${ts}', '${ts}')`
   );
 
   const rows = db(
-    `SELECT fr.id, fr.title, fr.description, fr.status, fr.vote_count,
-            fr.created_at, fr.updated_at,
-            u.name as author_name, u.email as author_email
-     FROM feature_requests fr
-     JOIN users u ON fr.user_id = u.id
+    `${FEATURE_REQUEST_SELECT}
      WHERE fr.id = '${id}'`
   );
 
-  return json({ data: rows[0] }, 201);
+  return json(toFeatureRequest(rows[0], new Set<string>()), 201);
 }
 
 // ---- PATCH /api/feature-requests/:id (admin only) ----
@@ -140,10 +174,13 @@ async function handleUpdateFeatureRequest(
   req: Request,
   id: string
 ): Promise<Response> {
-  const user = getUserFromRequest(req);
+  const user = currentUser(req);
   try {
     requireAdmin(user);
-  } catch {
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return json({ error: err.message }, err.status);
+    }
     return json({ error: "Forbidden — admin access required" }, 403);
   }
 
@@ -187,24 +224,17 @@ async function handleUpdateFeatureRequest(
   );
 
   const rows = db(
-    `SELECT fr.id, fr.title, fr.description, fr.status, fr.vote_count,
-            fr.created_at, fr.updated_at,
-            u.name as author_name, u.email as author_email
-     FROM feature_requests fr
-     JOIN users u ON fr.user_id = u.id
+    `${FEATURE_REQUEST_SELECT}
      WHERE fr.id = '${sanitize(id)}'`
   );
 
-  return json({ data: rows[0] });
+  return json(toFeatureRequest(rows[0], new Set<string>()));
 }
 
 // ---- POST /api/feature-requests/:id/vote ----
 
-function handleToggleVote(
-  _req: Request,
-  id: string
-): Response {
-  const user = getUserFromRequest(_req);
+function handleToggleVote(req: Request, id: string): Response {
+  const user = currentUser(req);
   if (!user) {
     return json({ error: "Authentication required" }, 401);
   }
@@ -218,33 +248,40 @@ function handleToggleVote(
 
   const existingVote = db(
     `SELECT id FROM votes
-     WHERE user_id = '${sanitize(user.id)}'
+     WHERE user_id = '${sanitize(user.userId)}'
        AND feature_request_id = '${sanitize(id)}'`
   );
 
   if (existingVote.length > 0) {
     db(
       `DELETE FROM votes
-       WHERE user_id = '${sanitize(user.id)}'
+       WHERE user_id = '${sanitize(user.userId)}'
          AND feature_request_id = '${sanitize(id)}'`
     );
     db(
       `UPDATE feature_requests SET vote_count = vote_count - 1
        WHERE id = '${sanitize(id)}'`
     );
-    return json({ data: { voted: false, feature_request_id: id } });
   } else {
     const voteId = uuid();
     db(
       `INSERT INTO votes (id, user_id, feature_request_id)
-       VALUES ('${voteId}', '${sanitize(user.id)}', '${sanitize(id)}')`
+       VALUES ('${voteId}', '${sanitize(user.userId)}', '${sanitize(id)}')`
     );
     db(
       `UPDATE feature_requests SET vote_count = vote_count + 1
        WHERE id = '${sanitize(id)}'`
     );
-    return json({ data: { voted: true, feature_request_id: id } }, 201);
   }
+
+  const counts = db(
+    `SELECT vote_count FROM feature_requests WHERE id = '${sanitize(id)}'`
+  );
+
+  return json({
+    vote_count: Number(counts[0]?.vote_count ?? 0),
+    has_voted: existingVote.length === 0,
+  });
 }
 
 // ---- Register all Feature Request routes ----
@@ -252,9 +289,5 @@ function handleToggleVote(
 registerRoute("GET", "/api/feature-requests", handleListFeatureRequests);
 registerRoute("GET", "/api/feature-requests/:id", handleGetFeatureRequest);
 registerRoute("POST", "/api/feature-requests", handleCreateFeatureRequest);
-registerRoute(
-  "PATCH",
-  "/api/feature-requests/:id",
-  handleUpdateFeatureRequest
-);
+registerRoute("PATCH", "/api/feature-requests/:id", handleUpdateFeatureRequest);
 registerRoute("POST", "/api/feature-requests/:id/vote", handleToggleVote);

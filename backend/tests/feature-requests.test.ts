@@ -6,7 +6,7 @@
  * Run against a dedicated test database when possible.
  */
 
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { db, uuid } from "../src/db/index";
 import { createToken, verifyToken } from "../src/auth/index";
 

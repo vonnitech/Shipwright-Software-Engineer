@@ -68,7 +68,9 @@ export function matchRoute(
   return null;
 }
 
-// ---- Require all route modules to register themselves ----
-import "./health";
-import "./auth";
-import "./feature-requests";
+// NOTE: route modules are imported by the server entry point (src/index.ts),
+// not here. Importing them from this module creates a cycle — each route module
+// imports { registerRoute } from "./index", and ES module imports are hoisted,
+// so a side-effect import here would run route registration before `routes`
+// below is initialised (ReferenceError: cannot access 'routes' before
+// initialization).

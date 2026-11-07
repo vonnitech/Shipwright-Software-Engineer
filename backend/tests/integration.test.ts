@@ -51,7 +51,7 @@ describe("Feature Request Board Integration Tests", () => {
       body: JSON.stringify({ name: "Test User", email: "test@example.com" }),
     });
     expect(res.status).toBe(201);
-    const data = await res.json();
+    const data = (await res.json()) as any;
     expect(data.user.name).toBe("Test User");
     expect(data.token).toBeDefined();
     userToken = data.token;
@@ -63,7 +63,7 @@ describe("Feature Request Board Integration Tests", () => {
       body: JSON.stringify({ email: "test@example.com" }),
     });
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as any;
     expect(data.token).toBe(userToken);
   });
 
@@ -82,7 +82,7 @@ describe("Feature Request Board Integration Tests", () => {
       body: JSON.stringify({ title: "New Feature", description: "Desc" }),
     });
     expect(res.status).toBe(201);
-    const data = await res.json();
+    const data = (await res.json()) as any;
     expect(data.title).toBe("New Feature");
     requestId = data.id;
   });
@@ -90,7 +90,7 @@ describe("Feature Request Board Integration Tests", () => {
   it("List feature requests", async () => {
     const res = await fetch(`${BASE_URL}/api/feature-requests`);
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as any;
     expect(data.items.length).toBeGreaterThan(0);
     expect(data.items[0].title).toBe("New Feature");
   });
@@ -98,7 +98,7 @@ describe("Feature Request Board Integration Tests", () => {
   it("Get single feature request", async () => {
     const res = await fetch(`${BASE_URL}/api/feature-requests/${requestId}`);
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as any;
     expect(data.id).toBe(requestId);
   });
 
@@ -108,7 +108,7 @@ describe("Feature Request Board Integration Tests", () => {
       headers: { Authorization: `Bearer ${userToken}` },
     });
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as any;
     expect(data.vote_count).toBe(1);
     expect(data.has_voted).toBe(true);
   });
@@ -119,7 +119,7 @@ describe("Feature Request Board Integration Tests", () => {
       headers: { Authorization: `Bearer ${userToken}` },
     });
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as any;
     expect(data.vote_count).toBe(0);
     expect(data.has_voted).toBe(false);
   });
@@ -135,7 +135,7 @@ describe("Feature Request Board Integration Tests", () => {
       method: "POST",
       headers: { Authorization: `Bearer ${userToken}` },
     });
-    const data = await res.json();
+    const data = (await res.json()) as any;
     expect(data.vote_count).toBe(0);
   });
 
@@ -149,14 +149,25 @@ describe("Feature Request Board Integration Tests", () => {
   });
 
   it("Admin status update (success)", async () => {
-    // Manually promote user to admin in test DB
-    execSync(`sqlite3 ${TEST_DB} "UPDATE users SET role = 'admin' WHERE email = 'admin@example.com' || INSERT INTO users (id, name, email, role) VALUES ('admin-id', 'Admin', 'admin@example.com', 'admin')"`);
-    
-    const loginRes = await fetch(`${BASE_URL}/auth/signup`, {
+    // Create the admin account, then promote it in the test DB (the API has no
+    // promotion endpoint — admins are provisioned out of band).
+    const signupRes = await fetch(`${BASE_URL}/auth/signup`, {
       method: "POST",
       body: JSON.stringify({ name: "Admin", email: "admin@example.com" }),
     });
-    const { token } = await loginRes.json();
+    expect(signupRes.status).toBe(201);
+
+    execSync(
+      `sqlite3 ${TEST_DB} "UPDATE users SET role = 'admin' WHERE email = 'admin@example.com'"`
+    );
+
+    // Log in again so the token carries the admin role.
+    const loginRes = await fetch(`${BASE_URL}/auth/login`, {
+      method: "POST",
+      body: JSON.stringify({ email: "admin@example.com" }),
+    });
+    expect(loginRes.status).toBe(200);
+    const { token } = (await loginRes.json()) as any;
     adminToken = token;
 
     const res = await fetch(`${BASE_URL}/api/feature-requests/${requestId}`, {
@@ -165,7 +176,7 @@ describe("Feature Request Board Integration Tests", () => {
       body: JSON.stringify({ status: "planned" }),
     });
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as any;
     expect(data.status).toBe("planned");
   });
 

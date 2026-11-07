@@ -1,0 +1,3 @@
+[test]
+# Each `bun test` run gets an isolated SQLite database (see tests/setup-test-db.ts).
+preload = ["./tests/setup-test-db.ts"]
